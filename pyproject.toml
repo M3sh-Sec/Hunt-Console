@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "huntconsole"
+version = "1.0.0"
+description = "Threat-intel-to-hunting-query pipeline: PCAP/report/manual IOC and TTP ingestion, producing validated KQL, SPL, and Sigma detection queries."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary - internal tool" }
+dependencies = []
+
+[project.optional-dependencies]
+connectors = ["requests>=2.31", "msal>=1.28"]
+
+[project.scripts]
+huntconsole = "cli:main"
+
+[tool.setuptools]
+py-modules = ["cli"]
+
+[tool.setuptools.packages.find]
+include = ["connectors*", "ir*", "backends*", "explanation*", "parser*", "manual_input*", "report_parser*"]
+exclude = ["*.tests*", "*tests*"]

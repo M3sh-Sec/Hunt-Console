@@ -1,0 +1,54 @@
+# connectors/registry.yaml
+#
+# Enable/disable connectors per deployment without touching code.
+# `required_env` lists the environment variables (or Key Vault secret names)
+# each connector needs; `read_only_scopes` documents the exact least-privilege
+# scopes to grant — nothing beyond these should ever be requested.
+
+connectors:
+  sentinel:
+    module: connectors.sentinel
+    class: SentinelConnector
+    enabled: true
+    mode: pull
+    required_env:
+      - AZURE_TENANT_ID
+      - AZURE_CLIENT_ID
+      - AZURE_CLIENT_SECRET
+      - SENTINEL_WORKSPACE_ID
+      - SENTINEL_SUBSCRIPTION_ID
+      - SENTINEL_RESOURCE_GROUP
+      - SENTINEL_WORKSPACE_NAME
+    read_only_scopes:
+      - "Log Analytics Reader (data plane)"
+      - "Microsoft Sentinel Reader"
+
+  crowdstrike_falcon:
+    module: connectors.crowdstrike_falcon
+    class: CrowdStrikeFalconConnector
+    enabled: true
+    mode: pull
+    required_env:
+      - CROWDSTRIKE_CLIENT_ID
+      - CROWDSTRIKE_CLIENT_SECRET
+      - CROWDSTRIKE_BASE_URL
+      - CROWDSTRIKE_HUMIO_BASE_URL
+      - CROWDSTRIKE_HUMIO_REPO
+    read_only_scopes:
+      - "Detections: READ"
+      - "Alerts: READ"
+      - "Hosts: READ"
+      - "Event streams / Search: READ"
+
+  # Additional platforms follow the same shape — implement BaseConnector,
+  # register here, document required_env + read_only_scopes.
+  splunk_es:
+    module: connectors.splunk_es
+    class: SplunkESConnector
+    enabled: false
+    mode: pull
+    required_env:
+      - SPLUNK_ES_BASE_URL
+      - SPLUNK_ES_TOKEN
+    read_only_scopes:
+      - "notable events: read-only role"
