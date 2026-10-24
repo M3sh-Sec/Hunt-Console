@@ -201,6 +201,24 @@ and load it once:
 huntconsole load-attck-bundle enterprise-attack.json
 ```
 
+### 6. Checking exposure to specific CVEs (new in 1.1.0)
+
+```
+huntconsole cve CVE-2026-25645 CVE-2026-59890 --out ./out
+huntconsole cve --ids-file ids.txt --kev ./known_exploited_vulnerabilities.json --out ./out
+```
+
+This builds an **exposure** hunt: it lists devices that Microsoft Defender Vulnerability Management reports as
+vulnerable to those CVEs (`DeviceTvmSoftwareVulnerabilities`), plus an installed-software check for the products
+named in the CISA KEV catalog (`DeviceTvmSoftwareInventory`). Things to know:
+
+- It does **not** prove exploitation. Exploitation hunting needs the advisory's specific behaviours; add them as reviewed conditions.
+- `--kev` takes a KEV JSON file **you** download from CISA. The tool never fetches it, so the catalog's age is under your control.
+- These tables exist in Defender **Advanced Hunting**. They are not in a Sentinel Log Analytics workspace unless you export them.
+- Network appliances (firewalls, mail gateways) do not run the Defender agent, so they will not appear. Use their own logs.
+- KQL only. Splunk and Sigma have no standard vulnerability source, so those targets report "no query" with the reason.
+- Threat reports that mention CVE ids now also produce this exposure query automatically.
+
 ### Reading the output
 
 Each run produces, in your `--out` folder:
@@ -262,29 +280,6 @@ Each run produces, in your `--out` folder:
 
 ---
 
-## Security posture
-
-- **PCAP parsing** runs in an isolated subprocess (`multiprocessing`,
-  `spawn` context) with a wall-clock timeout, a memory cap, and a
-  packet-count cap — a malformed or hostile capture file cannot hang or
-  crash the main process.
-- **Report ingestion** (PDF/DOCX/HTML/URL) enforces file-size limits,
-  zip-bomb guards on DOCX, and SSRF protections on URL fetches
-  (https-only, private/loopback/reserved IP ranges blocked, no
-  auto-redirect-following).
-- **Every generated query** is validated against a known field schema
-  before being written out, and every value interpolated into a query
-  passes through a shared sanitizer to prevent injection — verified in
-  this project's history against real parsers (PyYAML for Sigma output,
-  structural checks for KQL/SPL).
-- **No connector can remediate, isolate, contain, or otherwise modify**
-  anything on a source platform (Sentinel, Defender, CrowdStrike, etc.) —
-  read-only by design, enforced by a test that scans the codebase for
-  forbidden method names.
-- **Saved GUI hunts are segregated per user** (never shared) and
-  contained (deleting or updating one hunt cannot affect another) — see
-  `gui/HuntConsole.jsx`'s storage layer.
-
 ## A few things worth knowing before you rely on this
 
 - The CLI's core commands (`pcap`, `manual`, `report`,
@@ -301,3 +296,12 @@ Each run produces, in your `--out` folder:
   tenant in the environment this tool was built in — review the
   connector code and required permissions in `connectors/registry.yaml`
   before pointing it at production credentials.
+
+## Security (version 1.1.0)
+
+Version 1.1.0 fixes eight vulnerabilities found in an audit of 1.0.0, and adds a regression test for each.
+Read `SECURITY.md` for the details, what was verified, and what is still not covered. Short version:
+
+- If you ran 1.0.0 against a real tenant, upgrade before ingesting reports or alerts you do not control.
+- Run `python tests/test_security_regressions.py` (or `pytest tests/`) from the source tree after any change.
+- Dependencies are not hash-pinned. In a sensitive environment, build the install from a reviewed, pinned mirror.

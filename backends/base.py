@@ -93,3 +93,26 @@ class QueryBackend(abc.ABC):
         validation failures — raise only for programmer errors.
         """
         raise NotImplementedError
+
+
+_NUMBER_RE = re.compile(r"^-?\d{1,18}(\.\d{1,18})?$")
+
+
+def render_number(value: Any) -> str:
+    """
+    Strict numeric literal renderer for non-string fields. Accepts only real
+    ints/floats (never bool) or strings that are entirely a decimal number.
+    Anything else raises UnsupportedFieldError instead of being interpolated:
+    stripping characters is NOT enough for numeric context, because words
+    such as `or`, `and` and `union` need no special characters to alter a query.
+    """
+    if isinstance(value, bool):
+        raise UnsupportedFieldError("boolean is not a valid numeric value")
+    if isinstance(value, (int, float)):
+        text = repr(value)
+        if text in ("nan", "inf", "-inf"):
+            raise UnsupportedFieldError("non-finite number rejected")
+        return text
+    if isinstance(value, str) and _NUMBER_RE.match(value.strip()):
+        return value.strip()
+    raise UnsupportedFieldError(f"value {str(value)[:40]!r} is not a plain number")

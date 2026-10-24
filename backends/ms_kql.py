@@ -17,11 +17,12 @@ dropped — so the explanation layer and GUI can surface it to the analyst.
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from ir.schema import IRCondition, IRConditionGroup, IRDetection, Logic, Operator
-from .base import QueryBackend, RenderedQuery, UnsupportedFieldError, sanitize_value
-from .field_maps.ms_kql_fields import FIELD_MAP, TABLE_SCHEMAS, KqlFieldMapping
+from .base import QueryBackend, RenderedQuery, UnsupportedFieldError, render_number, sanitize_value
+from .field_maps.ms_kql_fields import FIELD_MAP, SNAPSHOT_TABLES, TABLE_SCHEMAS, KqlFieldMapping
 
 _OPERATOR_TEMPLATES = {
     Operator.EQUALS: lambda col, val, is_str: f'{col} == {val}' if not is_str else f'{col} == "{val}"',
@@ -45,7 +46,7 @@ def _render_leaf(cond: IRCondition, mapping: KqlFieldMapping) -> str:
         if is_str:
             literal = "(" + ", ".join(f'"{sanitize_value(v)}"' for v in values) + ")"
         else:
-            literal = "(" + ", ".join(str(v) for v in values) + ")"
+            literal = "(" + ", ".join(render_number(v) for v in values) + ")"
         op = "in" if cond.operator == Operator.IN else "!in"
         return f"{mapping.column} {op} {literal}"
 
@@ -53,7 +54,18 @@ def _render_leaf(cond: IRCondition, mapping: KqlFieldMapping) -> str:
     if template is None:
         raise UnsupportedFieldError(f"operator {cond.operator} not supported by ms_kql backend")
 
-    val = sanitize_value(cond.value) if cond.operator != Operator.EXISTS else None
+    numeric_ops = (Operator.GREATER_THAN, Operator.LESS_THAN)
+    if cond.operator == Operator.EXISTS:
+        val = None
+    elif cond.operator in numeric_ops or (not is_str and cond.operator in (Operator.EQUALS, Operator.NOT_EQUALS)):
+        if mapping.value_type == "datetime":
+            val = sanitize_value(cond.value)
+            if not re.fullmatch(r"[0-9TZ:.+\-]{4,40}", val):
+                raise UnsupportedFieldError("datetime value is not a plain ISO timestamp")
+        else:
+            val = render_number(cond.value)
+    else:
+        val = sanitize_value(cond.value)
     return template(mapping.column, val, is_str)
 
 
@@ -139,10 +151,19 @@ class MsKqlBackend(QueryBackend):
         for table in sorted(referenced_tables):
             where_clause, caveats = _prune_for_table(detection.conditions, table)
             if where_clause is None:
-                continue  # shouldn't happen since table came from a surviving leaf, but be safe
+                # Every condition for this table was rejected (e.g. a non-numeric
+                # value for a numeric field). Report it; never drop silently.
+                results.append(RenderedQuery(
+                    platform=self.platform_name, dialect=self.dialect, table_or_index=table,
+                    query_text="", detection_id=detection.id,
+                    caveats=caveats + [f"no renderable condition remained for {table}; query not generated"],
+                    validated=False,
+                    validation_errors=["all conditions rejected during rendering"],
+                ))
+                continue
 
             time_filter = ""
-            if detection.time_window:
+            if detection.time_window and table not in SNAPSHOT_TABLES:
                 start = detection.time_window.start.strftime("%Y-%m-%dT%H:%M:%SZ")
                 end = detection.time_window.end.strftime("%Y-%m-%dT%H:%M:%SZ")
                 time_filter = f'| where TimeGenerated between (datetime({start}) .. datetime({end}))\n'

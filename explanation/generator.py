@@ -22,6 +22,36 @@ from .schema import MitreContext, QueryExplanation
 # own entries without colliding on table/index name collisions across
 # platforms (e.g. Splunk's "network:stream:tcp" vs KQL's "DeviceNetworkEvents").
 _MS_KQL_KNOWLEDGE: dict[str, dict[str, object]] = {
+    "DeviceTvmSoftwareVulnerabilities": {
+        "expected_output": (
+            "Each row is one device with one software vulnerability matching a CVE in the hunt. "
+            "A match means Defender Vulnerability Management currently lists that device as exposed to the CVE. "
+            "It does NOT show exploitation; use it to prioritise patching and to scope where to hunt for exploitation."
+        ),
+        "data_source_requirements": [
+            "Requires Microsoft Defender Vulnerability Management data. These are Advanced Hunting tables "
+            "(Defender portal); they are not in a Sentinel Log Analytics workspace unless you export them.",
+            "Coverage is limited to software/OS that Defender can fingerprint; a CVE with no rows can mean "
+            "'not exposed' or 'not detectable by Defender' - confirm with the vendor advisory.",
+        ],
+        "false_positive_guidance": [
+            "Mitigated-but-unpatched systems (WAF rule, disabled feature, compensating control) still appear here.",
+            "Newly published CVEs can take hours to days to appear in Defender data after disclosure.",
+        ],
+    },
+    "DeviceTvmSoftwareInventory": {
+        "expected_output": (
+            "Each row is one installed product on one device whose vendor/name matches a product named in the "
+            "CVE advisory. Use it to find potentially affected assets when the vulnerability table has no rows."
+        ),
+        "data_source_requirements": [
+            "Requires Microsoft Defender Vulnerability Management (Advanced Hunting only).",
+        ],
+        "false_positive_guidance": [
+            "Vendor/product text matching is fuzzy: a match means 'product present', not 'vulnerable version'. "
+            "Compare SoftwareVersion with the advisory's affected range.",
+        ],
+    },
     "DeviceNetworkEvents": {
         "expected_output": (
             "Each row is one network connection event. A match means a monitored "

@@ -77,11 +77,14 @@ def build_ir_from_report(
 ) -> IRDetection:
     condition_items: list[IRCondition | IRConditionGroup] = []
     cve_tags: list[str] = []
+    cve_ids: list[str] = []
     unmapped_count = 0
 
     for ioc in iocs:
         if ioc.ioc_type == "cve":
             cve_tags.append(f"cve:{ioc.value}")
+            if ioc.value not in cve_ids and len(cve_ids) < 200:
+                cve_ids.append(ioc.value)
             continue
 
         entity_type = _IOC_TYPE_TO_ENTITY_TYPE.get(ioc.ioc_type)
@@ -103,12 +106,6 @@ def build_ir_from_report(
             ),
         ))
 
-    if not condition_items:
-        condition_items.append(IRCondition(
-            field="generic.raw_indicator", operator=Operator.EXISTS, value=None,
-            notes="no extractable IOCs found in this report",
-        ))
-
     mitre_techniques = sorted({t.technique_id for t in techniques})
 
     now = datetime.now(timezone.utc)
@@ -116,6 +113,21 @@ def build_ir_from_report(
         time_window = TimeWindow.around(report_publish_date, timedelta(days=7), timedelta(days=1))
     else:
         time_window = TimeWindow.around(now, timedelta(hours=1), timedelta(hours=1))
+
+    if cve_ids:
+        condition_items.append(IRCondition(
+            field="vuln.cve_id", operator=Operator.IN, value=cve_ids,
+            notes=f"CVE ids mentioned in report '{report_title}' (exposure check, not proof of exploitation)",
+            provenance=Provenance(source_type=SourceType.REPORT,
+                                  source_id=_report_fingerprint(report_source, report_bytes_for_fingerprint),
+                                  confidence=0.9),
+        ))
+
+    if not condition_items:
+        condition_items.append(IRCondition(
+            field="generic.raw_indicator", operator=Operator.EXISTS, value=None,
+            notes="no extractable IOCs found in this report",
+        ))
 
     detection = IRDetection(
         name=f"Hunt from threat report: {report_title}",

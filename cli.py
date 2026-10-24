@@ -94,6 +94,20 @@ def render_all(detection: IRDetection, targets: list[str]) -> dict[str, list[tup
     return results
 
 
+import re as _re
+
+
+def md_escape(text: str, *, limit: int = 2000) -> str:
+    """Neutralise untrusted text (report titles, alert names) before it is placed in the
+    Markdown hunt package: no HTML, no links/images, no headings or fences, bounded length."""
+    t = str(text)[:limit]
+    t = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    t = _re.sub(r"([\\`*_\[\]#!|~])", r"\\\1", t)
+    t = _re.sub(r"(?m)^(\s*)([-+=]|\d+\.)", r"\1\\\2", t)
+    return t.replace("\r", " ")
+
+
+
 def write_outputs(
     detection: IRDetection, results: dict[str, list[tuple[RenderedQuery, QueryExplanation]]], out_dir: Path
 ) -> Path:
@@ -104,14 +118,14 @@ def write_outputs(
     ir_path.write_text(json.dumps(detection.to_dict(), indent=2))
 
     hunt_package_lines = [
-        f"# Hunt Package: {detection.name}",
+        f"# Hunt Package: {md_escape(detection.name, limit=200)}",
         "",
         f"Generated: {datetime.now(timezone.utc).isoformat()}",
         f"Detection ID: {detection.id}",
-        f"Reviewed: {detection.reviewed} (reviewer: {detection.reviewer or 'n/a'})",
+        f"Reviewed: {detection.reviewed} (reviewer: {md_escape(detection.reviewer or 'n/a', limit=100)})",
         "",
         "## Description",
-        detection.description,
+        md_escape(detection.description),
         "",
     ]
 
@@ -120,9 +134,15 @@ def write_outputs(
         for rendered, explanation in pairs:
             query_count += 1
             ext = _EXTENSION_BY_DIALECT.get(rendered.dialect, "txt")
-            safe_table = rendered.table_or_index.replace(":", "_").replace("/", "_").replace(" ", "_")
+            safe_table = _re.sub(r"[^A-Za-z0-9_.-]", "_", rendered.table_or_index).strip(".") or "query"
             query_filename = f"{slug}_{target}_{safe_table}.{ext}"
             query_path = out_dir / query_filename
+            if not rendered.query_text.strip():
+                hunt_package_lines.append(f"## {target.upper()} - `{rendered.table_or_index}`: NO QUERY GENERATED")
+                hunt_package_lines.append("")
+                hunt_package_lines.extend(f"- {md_escape(c, limit=400)}" for c in rendered.caveats)
+                hunt_package_lines.append("")
+                continue
             query_path.write_text(rendered.query_text)
 
             hunt_package_lines.append(f"## {target.upper()} — `{rendered.table_or_index}`")
@@ -133,7 +153,7 @@ def write_outputs(
                 hunt_package_lines.append(f"Validation errors: {rendered.validation_errors}")
             hunt_package_lines.append("")
             hunt_package_lines.append("```" + rendered.dialect)
-            hunt_package_lines.append(rendered.query_text)
+            hunt_package_lines.append(rendered.query_text.replace("```", "'''"))
             hunt_package_lines.append("```")
             hunt_package_lines.append("")
             hunt_package_lines.append(explanation.to_markdown())
@@ -211,6 +231,20 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(f"Ingestion warnings: {warnings}")
     print(f"Loaded report: {metadata.title} ({metadata.format}) from {metadata.source}")
 
+    _finish(detection, _resolve_targets(args.target), Path(args.out), args.auto_approve)
+
+
+def cmd_cve(args: argparse.Namespace) -> None:
+    from cve_hunt import build_ir_from_cves, load_kev_json
+
+    ids = list(args.ids or [])
+    if args.ids_file:
+        ids += [ln.strip() for ln in Path(args.ids_file).read_text().splitlines() if ln.strip() and not ln.startswith("#")]
+    kev = load_kev_json(args.kev) if args.kev else None
+    detection = build_ir_from_cves(ids, kev)
+    print("NOTE: this is an EXPOSURE hunt (which assets are vulnerable). It does not prove exploitation.")
+    if kev is None:
+        print("NOTE: no --kev file supplied; results are not enriched with CISA KEV status.")
     _finish(detection, _resolve_targets(args.target), Path(args.out), args.auto_approve)
 
 
@@ -294,6 +328,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--title", help="report title (for provenance)")
     _add_common(p_report)
     p_report.set_defaults(func=cmd_report)
+
+    p_cve = sub.add_parser("cve", help="exposure hunt for CVE ids (optionally enriched from a CISA KEV json file)")
+    p_cve.add_argument("ids", nargs="*", help="CVE ids, e.g. CVE-2026-25645")
+    p_cve.add_argument("--ids-file", help="text file with one CVE id per line")
+    p_cve.add_argument("--kev", help="path to a CISA KEV catalog json you downloaded (not fetched by this tool)")
+    _add_common(p_cve)
+    p_cve.set_defaults(func=cmd_cve)
 
     p_alert = sub.add_parser("alert", help="pull a live alert from a connected platform (requires credentials)")
     p_alert.add_argument("--platform", required=True, choices=sorted(_CONNECTOR_REGISTRY))

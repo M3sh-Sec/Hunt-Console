@@ -45,6 +45,7 @@ from .base import (
     audit_log,
     retry_with_backoff,
 )
+from .query_guard import enforce_lql_scope, filter_techniques, validate_identifier
 
 # LogScale repositories/views this connector may search — defense in depth,
 # independent of what the query builder generates.
@@ -172,6 +173,7 @@ class CrowdStrikeFalconConnector(BaseConnector):
         return data.get("resources", [])
 
     def get_alert_detail(self, alert_id: str) -> NormalizedAlert:
+        validate_identifier(alert_id, what="detection id")
         self.authenticate()
         details = self._get_detect_details([alert_id])
         if not details:
@@ -197,6 +199,7 @@ class CrowdStrikeFalconConnector(BaseConnector):
                 f"repo '{self._humio_repo}' not in allow-list {ALLOWED_REPOS}"
             )
 
+        enforce_lql_scope(query)
         self.authenticate()
         import requests
 
@@ -230,6 +233,7 @@ class CrowdStrikeFalconConnector(BaseConnector):
 
     def get_incident(self, incident_id: str) -> dict[str, Any]:
         """Fetches a Falcon Incident (groups related detections) — read-only GET."""
+        validate_identifier(incident_id, what="incident id")
         self.authenticate()
         import requests
 
@@ -277,9 +281,9 @@ class CrowdStrikeFalconConnector(BaseConnector):
             entities.append(NormalizedEntity(entity_type="host", value=device["hostname"],
                                                raw_field_name="device.hostname"))
 
-        techniques = sorted({
+        techniques = filter_techniques(sorted({
             b["technique_id"] for b in d.get("behaviors", []) if b.get("technique_id")
-        })
+        }))
 
         max_severity = max((b.get("severity", 0) for b in d.get("behaviors", [])), default=0)
 

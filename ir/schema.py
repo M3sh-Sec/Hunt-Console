@@ -42,6 +42,7 @@ SCHEMA_VERSION = "1.0"
 # --------------------------------------------------------------------------
 
 FIELD_TAXONOMY = {
+    "vuln.cve_id", "software.vendor", "software.name",
     "network.src_ip", "network.dst_ip", "network.src_port", "network.dst_port",
     "network.protocol", "network.direction",
     "dns.query", "dns.response_ip",

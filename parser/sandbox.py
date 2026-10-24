@@ -124,26 +124,30 @@ def parse_pcap_sandboxed(
     result_queue: multiprocessing.Queue = ctx.Queue()
     process = ctx.Process(target=_parse_worker, args=(data, memory_limit_bytes, result_queue))
     process.start()
-    process.join(timeout=timeout_seconds)
 
+    # Read the result before join(): a child blocked writing a large result to a
+    # full pipe would otherwise never exit and be misreported as a timeout.
+    import queue as _queue
+    try:
+        status, payload = result_queue.get(timeout=timeout_seconds)
+    except _queue.Empty:
+        status, payload = None, None
+
+    process.join(timeout=5)
     if process.is_alive():
         process.terminate()
         process.join(timeout=5)
         if process.is_alive():
             process.kill()
+            process.join(timeout=5)
+
+    if status is None:
+        if process.exitcode not in (0, None):
+            raise PcapValidationError(
+                f"pcap parser subprocess exited abnormally (code {process.exitcode}), "
+                f"likely due to the {memory_limit_bytes}-byte memory limit or a crafted malformed file"
+            )
         raise PcapSandboxTimeoutError(f"pcap parsing exceeded {timeout_seconds}s timeout and was terminated")
-
-    if process.exitcode not in (0, None) and result_queue.empty():
-        # Most likely killed by the OOM/memory limit (SIGKILL/SIGSEGV from RLIMIT_AS)
-        raise PcapValidationError(
-            f"pcap parser subprocess exited abnormally (code {process.exitcode}), "
-            f"likely due to the {memory_limit_bytes}-byte memory limit or a crafted malformed file"
-        )
-
-    if result_queue.empty():
-        raise PcapValidationError("pcap parser subprocess produced no result")
-
-    status, payload = result_queue.get()
     if status == "error":
         raise PcapFormatError(payload)
 
