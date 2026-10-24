@@ -58,6 +58,11 @@ FIELD_MAP: dict[str, KqlFieldMapping] = {
     "host.name": KqlFieldMapping("DeviceNetworkEvents", "DeviceName"),
     "host.id": KqlFieldMapping("DeviceNetworkEvents", "DeviceId"),
 
+    # Defender Vulnerability Management (Advanced Hunting only; snapshot tables, no TimeGenerated)
+    "vuln.cve_id": KqlFieldMapping("DeviceTvmSoftwareVulnerabilities", "CveId"),
+    "software.vendor": KqlFieldMapping("DeviceTvmSoftwareInventory", "SoftwareVendor"),
+    "software.name": KqlFieldMapping("DeviceTvmSoftwareInventory", "SoftwareName"),
+
     "registry.key": KqlFieldMapping("DeviceRegistryEvents", "RegistryKey"),
     "registry.value": KqlFieldMapping("DeviceRegistryEvents", "RegistryValueName"),
     # mutex.name, email.*, ja3 intentionally omitted for v1 — not present in
@@ -70,7 +75,16 @@ FIELD_MAP: dict[str, KqlFieldMapping] = {
 # in-depth check independent of FIELD_MAP correctness. Not exhaustive —
 # covers the columns this backend actually emits, plus TimeGenerated which
 # every table has and every rendered query filters on.
+SNAPSHOT_TABLES = {"DeviceTvmSoftwareVulnerabilities", "DeviceTvmSoftwareInventory"}
+
 TABLE_SCHEMAS: dict[str, set[str]] = {
+    "DeviceTvmSoftwareVulnerabilities": {
+        "DeviceId", "DeviceName", "OSPlatform", "SoftwareVendor", "SoftwareName",
+        "SoftwareVersion", "CveId", "VulnerabilitySeverityLevel", "RecommendedSecurityUpdate",
+    },
+    "DeviceTvmSoftwareInventory": {
+        "DeviceId", "DeviceName", "OSPlatform", "SoftwareVendor", "SoftwareName", "SoftwareVersion",
+    },
     "DeviceNetworkEvents": {
         "TimeGenerated", "DeviceId", "DeviceName", "LocalIP", "RemoteIP",
         "LocalPort", "RemotePort", "Protocol", "RemoteUrl",

@@ -116,7 +116,12 @@ def load_text_from_docx(data: bytes) -> str:
         )
 
     try:
-        document_xml = zf.read("word/document.xml")
+        # Do not trust the declared size in the zip header (attacker-controlled):
+        # read through a bounded stream so actual output is capped.
+        with zf.open("word/document.xml") as _fh:
+            document_xml = _fh.read(MAX_ZIP_UNCOMPRESSED_TOTAL + 1)
+        if len(document_xml) > MAX_ZIP_UNCOMPRESSED_TOTAL:
+            raise ValueError("word/document.xml exceeds the decompressed size limit (possible zip bomb)")
     except KeyError as exc:
         raise ReportLoadError("not a valid DOCX — missing word/document.xml") from exc
 
@@ -189,7 +194,8 @@ def load_text_from_pdf(data: bytes) -> tuple[str, list[str]]:
         content = raw_stream
         if b"/FlateDecode" in obj_dict:
             try:
-                content = zlib.decompress(raw_stream, bufsize=MAX_PDF_STREAM_DECOMPRESSED)
+                d = zlib.decompressobj()
+                content = d.decompress(raw_stream, MAX_PDF_STREAM_DECOMPRESSED + 1)  # hard output cap
             except zlib.error as exc:
                 warnings.append(f"skipped a FlateDecode stream that failed to decompress: {exc}")
                 continue

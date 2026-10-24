@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Optional
 
 from ir.schema import IRCondition, IRConditionGroup, IRDetection, Logic, Operator
-from .base import QueryBackend, RenderedQuery, UnsupportedFieldError, sanitize_value
+from .base import QueryBackend, RenderedQuery, UnsupportedFieldError, render_number, sanitize_value
 from .field_maps.splunk_spl_fields import FIELD_MAP, INDEX_SOURCETYPE_SCHEMAS, SplFieldMapping
 
 
@@ -37,15 +37,15 @@ def _render_leaf(cond: IRCondition, mapping: SplFieldMapping) -> str:
         if is_str:
             literal = ", ".join(f'"{sanitize_value(v)}"' for v in values)
         else:
-            literal = ", ".join(str(v) for v in values)
+            literal = ", ".join(render_number(v) for v in values)
         expr = f'in({field}, {literal})'
         return expr if cond.operator == Operator.IN else f'NOT {expr}'
 
     if cond.operator == Operator.EQUALS:
-        val = sanitize_value(cond.value)
+        val = sanitize_value(cond.value) if is_str else render_number(cond.value)
         return f'{field}=="{val}"' if is_str else f'{field}=={val}'
     if cond.operator == Operator.NOT_EQUALS:
-        val = sanitize_value(cond.value)
+        val = sanitize_value(cond.value) if is_str else render_number(cond.value)
         return f'{field}!="{val}"' if is_str else f'{field}!={val}'
     if cond.operator == Operator.CONTAINS:
         val = _escape_like_wildcards(sanitize_value(cond.value))
@@ -63,9 +63,9 @@ def _render_leaf(cond: IRCondition, mapping: SplFieldMapping) -> str:
         val = sanitize_value(cond.value)
         return f'match({field}, "{val}")'
     if cond.operator == Operator.GREATER_THAN:
-        return f'{field}>{cond.value}'
+        return f'{field}>{render_number(cond.value)}'
     if cond.operator == Operator.LESS_THAN:
-        return f'{field}<{cond.value}'
+        return f'{field}<{render_number(cond.value)}'
     if cond.operator == Operator.EXISTS:
         return f'isnotnull({field})'
 
@@ -139,6 +139,13 @@ class SplunkSplBackend(QueryBackend):
         for key in sorted(referenced_keys):
             where_clause, caveats = _prune_for_key(detection.conditions, key)
             if where_clause is None:
+                results.append(RenderedQuery(
+                    platform=self.platform_name, dialect=self.dialect, table_or_index=key,
+                    query_text="", detection_id=detection.id,
+                    caveats=caveats + [f"no renderable condition remained for {key}; query not generated"],
+                    validated=False,
+                    validation_errors=["all conditions rejected during rendering"],
+                ))
                 continue
 
             index, sourcetype = key.split(":", 1)

@@ -39,6 +39,7 @@ from .base import (
     audit_log,
     retry_with_backoff,
 )
+from .query_guard import enforce_kql_scope, filter_techniques, validate_identifier
 
 # Tables this connector is permitted to query via run_query(), independent of
 # what the query builder generates upstream — defense in depth.
@@ -125,7 +126,7 @@ class SentinelConnector(BaseConnector):
         # SystemAlertId is not attacker-controlled input here, but we still
         # never string-format untrusted values directly — use a parameterized
         # KQL literal escape for defense in depth.
-        safe_id = _escape_kql_string(alert_id)
+        safe_id = _escape_kql_string(alert_id)  # strict allow-list, raises on anything odd
         kql = f"""
         SecurityAlert
         | where SystemAlertId == "{safe_id}"
@@ -187,6 +188,7 @@ class SentinelConnector(BaseConnector):
         Fetches a Sentinel Incident via the Azure management-plane REST API
         (read-only GET — never PATCH/PUT/DELETE from this method).
         """
+        incident_id = validate_identifier(incident_id, what="incident id")
         self.authenticate()
         import requests
 
@@ -228,8 +230,17 @@ class SentinelConnector(BaseConnector):
                 entities.append(NormalizedEntity(entity_type=ent_type, value=str(value),
                                                    raw_field_name="Entities"))
 
-        techniques_raw = row.get("Tactics", "") or ""
-        techniques = [t.strip() for t in str(techniques_raw).split(",") if t.strip()]
+        # "Tactics" holds tactic NAMES (e.g. Execution), not technique IDs; only
+        # well-formed T-numbers from the Techniques column may reach the IR.
+        techniques_raw = row.get("Techniques", "") or ""
+        if isinstance(techniques_raw, str):
+            try:
+                import json as _j
+                parsed = _j.loads(techniques_raw)
+                techniques_raw = parsed if isinstance(parsed, list) else techniques_raw
+            except ValueError:
+                techniques_raw = [t for t in techniques_raw.replace("[", "").replace("]", "").replace('"', "").split(",")]
+        techniques = filter_techniques(techniques_raw)
 
         return NormalizedAlert(
             source_platform=self.platform_name,
@@ -247,22 +258,12 @@ class SentinelConnector(BaseConnector):
 # --------------------------------------------------------------------
 def _escape_kql_string(value: str) -> str:
     """Minimal allow-list escaping for values interpolated into KQL string literals."""
-    return value.replace('"', "").replace("\\", "").replace("\n", "")
+    return validate_identifier(value, what="alert id")
 
 
 def _enforce_table_allowlist(query: str) -> None:
-    """
-    Defense-in-depth check: confirm the query only references tables this
-    connector is configured to allow, independent of upstream query-builder
-    trust. Not a substitute for proper KQL parsing, but blocks obvious
-    out-of-scope table access (e.g. a generated query accidentally or
-    maliciously targeting an unexpected table).
-    """
-    referenced = {tok.strip() for tok in query.replace("\n", " ").split("|")[0].split() if tok[:1].isupper()}
-    if referenced and not referenced & ALLOWED_TABLES:
-        raise ConnectorQueryScopeError(
-            f"query does not reference an allow-listed table: {ALLOWED_TABLES}"
-        )
+    """Strict single-table scope check (see connectors/query_guard.py)."""
+    enforce_kql_scope(query, ALLOWED_TABLES)
 
 
 def _parse_ts(value: Any) -> datetime:

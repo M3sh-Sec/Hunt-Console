@@ -94,19 +94,48 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
         raise UnsafeUrlError(f"refusing to follow redirect to '{newurl}' — re-submit the new URL explicitly")
 
 
+def _make_pinned_https_handler(resolver: Optional[ResolverFn]):
+    """
+    HTTPS handler that resolves the hostname ONCE at connect time, re-checks every
+    address, and connects to that exact IP while keeping the original hostname for
+    SNI and certificate verification. This closes the DNS-rebinding window between
+    is_safe_url() and the real connection. TLS verification stays fully enabled.
+    """
+    import http.client
+    import ssl
+
+    res = resolver or _default_resolver
+
+    class _PinnedConn(http.client.HTTPSConnection):
+        def connect(self):
+            addrs = res(self.host)
+            if not addrs:
+                raise UnsafeUrlError(f"hostname '{self.host}' did not resolve")
+            for a in addrs:
+                if _is_private_or_reserved(a):
+                    raise UnsafeUrlError(f"hostname '{self.host}' resolved to a private/reserved address ({a}) at connect time")
+            sock = socket.create_connection((addrs[0], self.port or 443), self.timeout)
+            ctx = self._context if hasattr(self, "_context") else ssl.create_default_context()
+            self.sock = ctx.wrap_socket(sock, server_hostname=self.host)
+
+    class _PinnedHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req):
+            return self.do_open(_PinnedConn, req, context=ssl.create_default_context())
+
+    return _PinnedHandler()
+
+
 def fetch_report_url(url: str, *, resolver: Optional[ResolverFn] = None) -> bytes:
     """
-    Fetches `url` after passing is_safe_url(), with no automatic redirect
-    following (a redirect to an internal address is a classic SSRF bypass —
-    each redirect target must be independently validated, so any redirect
-    is treated as a failure here rather than silently followed).
+    Fetches `url` after passing is_safe_url(), with no automatic redirect following
+    and with the connection pinned to the validated IP (see _make_pinned_https_handler).
     """
     safe, reason = is_safe_url(url, resolver=resolver)
     if not safe:
         raise UnsafeUrlError(f"refusing to fetch '{url}': {reason}")
 
     req = urllib.request.Request(url, headers={"User-Agent": "threat-intel-ingest/1.0"})
-    opener = urllib.request.build_opener(_NoRedirectHandler)
+    opener = urllib.request.build_opener(_NoRedirectHandler, _make_pinned_https_handler(resolver))
     with opener.open(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
         content_type = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
         if content_type and content_type not in ALLOWED_CONTENT_TYPES:
