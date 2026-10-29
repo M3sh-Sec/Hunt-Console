@@ -263,6 +263,7 @@ class ToolState:
         self.cfg = cfg
         self.technique_rows = technique_rows
         self.tools = {t["name"]: t for t in list_tools(cfg)}
+        self.cancel_event = None        # set by the protocol layer; lets a cancelled call stop its worker
 
 
 def call_tool(state: ToolState, name: str, arguments: Any) -> dict[str, Any]:
@@ -332,7 +333,8 @@ def _hunt_from_file(state: ToolState, args: dict[str, Any], targets: list[str]) 
 
 
 def _sandboxed(state: ToolState, job: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return run_job(job, payload, technique_lookup=state.technique_rows, drop_network=state.cfg.sandbox_network)
+    return run_job(job, payload, technique_lookup=state.technique_rows, drop_network=state.cfg.sandbox_network,
+                   cancel=state.cancel_event)
 
 
 def _lookup(technique_id: str) -> dict[str, Any]:

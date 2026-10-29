@@ -27,6 +27,7 @@ SUPPORTED_KEYWORDS = {
     "enum", "minimum", "maximum", "description", "title", "default",
 }
 MAX_ERRORS = 20
+_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 class SchemaError(Exception):
@@ -38,7 +39,7 @@ def _compile(pattern: str) -> tuple[re.Pattern[str], bool]:
     # A pattern written as ^...$ must match the whole string. Python's `$` also
     # matches before a trailing newline, so use fullmatch on the inner part instead.
     if pattern.startswith("^") and pattern.endswith("$") and not pattern.endswith("\\$"):
-        return re.compile(pattern[1:-1]), True
+        return re.compile(f"(?:{pattern[1:-1]})"), True
     return re.compile(pattern), False
 
 
@@ -86,6 +87,9 @@ def _validate(value: Any, schema: dict[str, Any], path: str, errors: list[str]) 
         return
 
     if isinstance(value, str):
+        if _SURROGATE.search(value):
+            errors.append(f"{path}: contains invalid Unicode (unpaired surrogate)")
+            return
         if "minLength" in schema and len(value) < schema["minLength"]:
             errors.append(f"{path}: shorter than {schema['minLength']} characters")
         if "maxLength" in schema and len(value) > schema["maxLength"]:

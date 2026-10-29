@@ -7,17 +7,20 @@ inputSchema, and file contents arrive as bytes the parent read under the
 allowed-folder policy, so nothing here opens files or the network.
 
 Output hygiene: everything returned to the model is built from structured
-fields (indicator values, technique IDs, generated query text). Raw report
-text, report snippets and parser notes are never returned. Strings are
-stripped of control characters and invisible Unicode (bidi overrides,
-zero-width characters) and length-capped, because tool output is read by the
-model and is a prompt-injection channel.
+fields (indicator values, technique IDs, generated query text, the title).
+Report prose, report snippets and parser notes are not returned. Indicator
+values themselves come from the input, so a URL or domain can still carry
+attacker-chosen words; results say so. Strings are stripped of control
+characters and all invisible Unicode (format, private-use, unassigned and tag
+characters, line separators, invisible fillers) and length-capped, because
+tool output is read by the model and is a prompt-injection channel.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from typing import Any
 
 from .sandbox import JobInputError
@@ -35,21 +38,34 @@ MAX_VALUE_CHARS = 300
 MAX_TEXT_CHARS = 1000
 MAX_QUERY_CHARS = 200_000
 
-_INVISIBLE = re.compile("[​-‏‪-‮⁠-⁤⁦-⁩﻿­]")
+# Characters that render as nothing (or as a line break) and can hide text from a human reviewer:
+# Unicode format characters (Cf: bidi controls, zero-width, tag characters U+E0000-E007F), private-use (Co),
+# unassigned (Cn), surrogates (Cs), line/paragraph separators (Zl/Zp), plus invisible fillers and selectors.
+_EXTRA_INVISIBLE = {0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x180E, 0x3164, 0xFFA0, 0x2800}
+_DROP_CATEGORIES = {"Cf", "Co", "Cn", "Cs", "Zl", "Zp"}
 _CONTROL_ONE_LINE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 _CONTROL_MULTI_LINE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f]")
 
 
+def _strip_invisible(s: str) -> str:
+    if s.isascii():
+        return s
+    return "".join(
+        ch for ch in s
+        if unicodedata.category(ch) not in _DROP_CATEGORIES
+        and ord(ch) not in _EXTRA_INVISIBLE
+        and not (0xFE00 <= ord(ch) <= 0xFE0F or 0xE0100 <= ord(ch) <= 0xE01EF)   # variation selectors
+    )
+
+
 def clean(text: Any, limit: int = MAX_TEXT_CHARS) -> str:
     """One-line, printable, bounded."""
-    s = _INVISIBLE.sub("", str(text))
-    s = _CONTROL_ONE_LINE.sub(" ", s)
+    s = _CONTROL_ONE_LINE.sub(" ", _strip_invisible(str(text)))
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 
 def clean_multiline(text: Any, limit: int = MAX_QUERY_CHARS) -> str:
-    s = _INVISIBLE.sub("", str(text).replace("\r\n", "\n"))
-    s = _CONTROL_MULTI_LINE.sub(" ", s)
+    s = _CONTROL_MULTI_LINE.sub(" ", _strip_invisible(str(text).replace("\r\n", "\n")))
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 

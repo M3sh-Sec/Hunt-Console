@@ -82,7 +82,7 @@ limits, and only your chosen folder mounted read-only at `/data`.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--allow-dir DIR` | none | Folder the file tools may read. Repeat for more folders. Roots, your whole home folder and hidden folders are refused. Relative paths in tool calls resolve against the first folder. |
+| `--allow-dir DIR` | none | Folder the file tools may read. Repeat for more folders. Roots, system folders, your home folder (and any folder containing it) and hidden folders are refused. Relative paths in tool calls resolve against the first folder. |
 | `--rate-limit N` | 30 | Tool calls per minute (1–600). |
 | `--attck-bundle FILE` | built-in subset | MITRE ATT&CK enterprise STIX bundle for full technique names and descriptions. |
 | `--audit-log FILE` | stderr only | Also append audit lines to this file (created owner-only). |
@@ -101,7 +101,7 @@ limits, and only your chosen folder mounted read-only at `/data`.
 
 - **Server does not appear:** check that the `command` path exists and is absolute, and that the JSON is valid. Run the command yourself with `--version`.
 - **"refusing to run as root":** run the client as a normal user, or use the container.
-- **"file not found, or not inside a folder this server is allowed to read":** the path is outside every `--allow-dir` folder, is a symlink pointing outside, or does not exist. The message is the same in all three cases on purpose.
+- **"file not found, or not readable through this server":** the path is outside every `--allow-dir` folder, goes through a symlink pointing outside, is hidden, has several hard links, or does not exist. The message is the same in every case on purpose.
 - **Startup note about network namespaces:** your OS does not allow unprivileged user namespaces (common inside containers). Parsing still works. Use the container with `--network=none` for enforced isolation.
 
 ## Protocol support

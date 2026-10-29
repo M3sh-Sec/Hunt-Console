@@ -13,12 +13,17 @@ The child:
     RLIMIT_CORE=0 (no core dumps holding input data) and RLIMIT_NOFILE;
   * on Linux, where unprivileged user namespaces are available, moves into a new
     network namespace with no interfaces, so it cannot open network connections;
-  * never sees stdin, and its stdout is the server's stderr (see protocol.py),
-    so it cannot write into the MCP stream;
+  * gets /dev/null as stdin before any parsing code runs, and its stdout is the
+    server's stderr (see protocol.py), so it can neither read client messages
+    nor write into the MCP stream;
+  * on Linux is killed automatically if the server process dies (PR_SET_PDEATHSIG);
+  * is killed early when the client cancels the request or closes stdin;
   * returns at most MAX_RESULT_BYTES of JSON over a one-way pipe.
 
-These limits are defence in depth for the parsing step. They are not a
-substitute for running the whole server in a container (see SECURITY.md).
+These limits are defence in depth for the parsing step. They do NOT stop the
+worker from reading files the user can read or connecting to filesystem Unix
+sockets. The container in mcp_server/Dockerfile is the boundary for that
+(see SECURITY.md).
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ import json
 import multiprocessing
 import os
 import sys
+import threading
 import time
 from typing import Any
 
@@ -39,6 +45,36 @@ class SandboxError(Exception):
 
 class JobInputError(Exception):
     """Raised inside a job for bad input. The message is safe to return to the model."""
+
+
+class JobCancelled(Exception):
+    """The client cancelled the request, or stdin closed, while the job ran."""
+
+
+# Set by the stdin reader (protocol.py) when the client closes stdin; checked while a job runs.
+SHUTDOWN = threading.Event()
+
+
+def _isolate_process(parent_pid: int) -> None:
+    """Detach the worker from the server's stdin and tie its life to the server's."""
+    try:
+        devnull = os.open(os.devnull, os.O_RDONLY)
+        os.dup2(devnull, 0)
+        os.close(devnull)
+    except OSError:
+        pass
+    sys.stdin = open(os.devnull)   # noqa: SIM115 — replaced for the life of the worker
+    if sys.platform.startswith("linux"):
+        try:
+            import ctypes
+            import signal
+
+            libc = ctypes.CDLL(None, use_errno=True)
+            libc.prctl(1, signal.SIGKILL, 0, 0, 0)          # PR_SET_PDEATHSIG
+            if os.getppid() != parent_pid:                   # parent already gone
+                os._exit(1)
+        except (OSError, AttributeError):
+            pass
 
 
 def _drop_network() -> bool:
@@ -93,8 +129,10 @@ def _apply_limits(drop_network: bool) -> dict[str, Any]:
     return applied
 
 
-def _child_main(conn, job: str, payload: dict[str, Any], technique_lookup, drop_network: bool) -> None:
+def _child_main(conn, job: str, payload: dict[str, Any], technique_lookup, drop_network: bool,
+                parent_pid: int) -> None:
     sys.dont_write_bytecode = True
+    _isolate_process(parent_pid)
     try:
         applied = _apply_limits(drop_network)
         from . import jobs                      # imported after the limits are in place
@@ -135,21 +173,34 @@ def run_job(
     technique_lookup: list | None = None,
     drop_network: bool = True,
     timeout: float = config.WORKER_TIMEOUT_SECONDS,
+    cancel: threading.Event | None = None,
 ) -> dict[str, Any]:
     ctx = multiprocessing.get_context("spawn")
     receiver, sender = ctx.Pipe(duplex=False)
-    proc = ctx.Process(target=_child_main, args=(sender, job, payload, technique_lookup, drop_network),
+    proc = ctx.Process(target=_child_main, args=(sender, job, payload, technique_lookup, drop_network, os.getpid()),
                        daemon=False)
     started = time.monotonic()
     proc.start()
     sender.close()
     data: bytes | None = None
+    stopped_by: str | None = None
     try:
-        if receiver.poll(timeout):
-            try:
-                data = receiver.recv_bytes(maxlength=config.MAX_RESULT_BYTES + 4096)
-            except (EOFError, OSError):
-                data = None
+        deadline = started + timeout
+        while True:
+            if receiver.poll(min(0.2, max(0.0, deadline - time.monotonic()))):
+                try:
+                    data = receiver.recv_bytes(maxlength=config.MAX_RESULT_BYTES + 4096)
+                except (EOFError, OSError):
+                    data = None
+                break
+            if cancel is not None and cancel.is_set():
+                stopped_by = "cancelled"
+                break
+            if SHUTDOWN.is_set():
+                stopped_by = "shutdown"
+                break
+            if time.monotonic() >= deadline:
+                break
     finally:
         receiver.close()
         if data is not None:
@@ -161,6 +212,8 @@ def run_job(
                 proc.kill()
                 proc.join(timeout=5)
 
+    if stopped_by is not None:
+        raise JobCancelled(stopped_by)
     if data is None:
         if time.monotonic() - started >= timeout:
             raise SandboxError(f"processing took longer than {timeout:g} seconds and was stopped")
