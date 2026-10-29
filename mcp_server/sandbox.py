@@ -163,7 +163,7 @@ def run_job(
 
     if data is None:
         if time.monotonic() - started >= timeout:
-            raise SandboxError(f"processing took longer than {int(timeout)} seconds and was stopped")
+            raise SandboxError(f"processing took longer than {timeout:g} seconds and was stopped")
         raise SandboxError("processing stopped unexpectedly (the input may exceed the memory or CPU limit)")
     message = json.loads(data)
     if not message.get("ok"):
