@@ -56,7 +56,14 @@ def load_kev_json(path: str | Path) -> dict[str, KevEntry]:
     p = Path(path)
     if p.stat().st_size > MAX_KEV_BYTES:
         raise ValueError("KEV file exceeds size limit")
-    data = json.loads(p.read_text(encoding="utf-8"))
+    return parse_kev_json_text(p.read_text(encoding="utf-8"))
+
+
+def parse_kev_json_text(text: str) -> dict[str, KevEntry]:
+    """Same as load_kev_json() but for catalog text the caller has already read (and size-checked)."""
+    if len(text) > MAX_KEV_BYTES:
+        raise ValueError("KEV file exceeds size limit")
+    data = json.loads(text)
     vulns = data.get("vulnerabilities") if isinstance(data, dict) else None
     if not isinstance(vulns, list):
         raise ValueError("not a CISA KEV catalog: missing 'vulnerabilities' list")

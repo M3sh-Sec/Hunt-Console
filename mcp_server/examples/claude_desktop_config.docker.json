@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "huntconsole": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "--network=none",
+        "--read-only",
+        "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
+        "--pids-limit=64",
+        "--memory=2g",
+        "--cpus=1",
+        "--user", "10001:10001",
+        "--mount", "type=bind,source=/Users/YOU/ThreatIntel/inbox,target=/data,readonly",
+        "huntconsole-mcp:1.2.0",
+        "--allow-dir", "/data"
+      ]
+    }
+  }
+}

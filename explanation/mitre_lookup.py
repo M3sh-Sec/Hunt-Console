@@ -105,6 +105,15 @@ def load_and_activate_bundle(path) -> tuple[int, list[str]]:
     return len(new_lookup), warnings
 
 
+def activate_lookup(lookup: dict[str, TechniqueInfo], description: str) -> None:
+    """Installs an already-parsed lookup (for example one parsed in a sandboxed child process)."""
+    if not lookup:
+        raise ValueError("refusing to activate an empty technique lookup")
+    global _active_lookup, _active_source_description
+    _active_lookup = dict(lookup)
+    _active_source_description = description
+
+
 def reset_to_builtin_fallback() -> None:
     """Reverts the active lookup to the small built-in subset. Mainly useful for tests."""
     global _active_lookup, _active_source_description

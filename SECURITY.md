@@ -1,3 +1,16 @@
+# Security notes - Hunt Console
+
+## 1.2.0 (2026-10-29): MCP server
+
+1.2.0 adds `huntconsole-mcp`. Its security design, and a line-by-line mapping to the MCP security
+best practices and local-server guidance, are in [mcp_server/SECURITY.md](mcp_server/SECURITY.md).
+In short: stdio only, read-only and offline tools, no third-party code, file access only to folders
+the operator names, untrusted parsing in a sandboxed worker, strict input and output schemas, rate
+limiting, and an audit log that never records argument contents. No finding from the 1.1.0 audit
+below changes.
+
+---
+
 # Security notes - Hunt Console 1.1.0
 
 Audit date: 2026-10-23. Scope: the Python source tree of 1.0.0. The GUI artifact was reviewed but not changed.

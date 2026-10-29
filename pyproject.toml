@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "huntconsole"
-version = "1.1.0"
+version = "1.2.0"
 description = "Threat-intel-to-hunting-query pipeline: PCAP/report/manual IOC and TTP ingestion, producing validated KQL, SPL, and Sigma detection queries."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,10 +16,12 @@ connectors = ["requests>=2.33.0", "msal>=1.28"]
 
 [project.scripts]
 huntconsole = "cli:main"
+# MCP server (stdio). Standard library only: it adds no dependencies.
+huntconsole-mcp = "mcp_server.__main__:main"
 
 [tool.setuptools]
 py-modules = ["cli"]
 
 [tool.setuptools.packages.find]
-include = ["connectors*", "cve_hunt*", "ir*", "backends*", "explanation*", "parser*", "manual_input*", "report_parser*"]
+include = ["connectors*", "cve_hunt*", "ir*", "backends*", "explanation*", "parser*", "manual_input*", "report_parser*", "mcp_server*"]
 exclude = ["*.tests*", "*tests*"]

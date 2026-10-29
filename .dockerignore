@@ -1,0 +1,14 @@
+.git
+.github
+**/__pycache__
+**/*.pyc
+**/tests
+tests
+gui
+installers
+hunt_output
+*.egg-info
+build
+dist
+.venv
+venv
