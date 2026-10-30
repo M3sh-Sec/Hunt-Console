@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "huntconsole": {
+      "command": "/Users/YOU/.huntconsole/bin/huntconsole-mcp",
+      "args": [
+        "--allow-dir", "/Users/YOU/ThreatIntel/inbox",
+        "--rate-limit", "30",
+        "--audit-log", "/Users/YOU/.huntconsole/mcp-audit.log"
+      ]
+    }
+  }
+}

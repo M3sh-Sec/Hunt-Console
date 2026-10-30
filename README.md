@@ -27,8 +27,11 @@ The tool ships two ways to use it:
 - **A browser-based GUI** ("Hunt Console") — a self-contained interactive
   tool for the manual-entry and paste-a-report workflows, with your saved
   hunts stored privately (segregated per user, never shared).
+- **An MCP server** (`huntconsole-mcp`, new in 1.2.0) — lets Claude Desktop,
+  Claude Code or another MCP client use the same pipeline as read-only,
+  offline tools. See [mcp_server/README.md](mcp_server/README.md).
 
-Both produce the same kind of output: validated KQL/SPL/Sigma queries plus
+All three produce the same kind of output: validated KQL/SPL/Sigma queries plus
 explanations, ready to paste into your SIEM.
 
 ---
@@ -107,6 +110,20 @@ Optional flags (add after `install-windows.cmd`, e.g.
 The browser GUI needs no installation. Open it wherever you were given
 access to it (e.g., as a Claude artifact). Nothing to download, nothing to
 run locally.
+
+### Using it from Claude (MCP server)
+
+The installers also install `huntconsole-mcp`. Add it to your MCP client
+with its absolute path, for example in Claude Code:
+
+```bash
+claude mcp add --scope user huntconsole -- ~/.huntconsole/bin/huntconsole-mcp
+```
+
+Add `--allow-dir FOLDER` only if Claude should read report or PCAP files from
+that folder. Setup for Claude Desktop, the hardened container option and
+every flag are in [mcp_server/README.md](mcp_server/README.md); the security
+design is in [mcp_server/SECURITY.md](mcp_server/SECURITY.md).
 
 ---
 
@@ -297,9 +314,14 @@ Each run produces, in your `--out` folder:
   connector code and required permissions in `connectors/registry.yaml`
   before pointing it at production credentials.
 
-## Security (version 1.1.0)
+## Security (version 1.2.0)
 
-Version 1.1.0 fixes eight vulnerabilities found in an audit of 1.0.0, and adds a regression test for each.
+Version 1.2.0 adds the MCP server. It is stdio-only, read-only, offline,
+has no third-party dependencies, reads files only from folders you allow, and
+parses untrusted input in a sandboxed worker process. The full checklist
+against the MCP security recommendations is in `mcp_server/SECURITY.md`.
+
+Version 1.1.0 fixed eight vulnerabilities found in an audit of 1.0.0, and adds a regression test for each.
 Read `SECURITY.md` for the details, what was verified, and what is still not covered. Short version:
 
 - If you ran 1.0.0 against a real tenant, upgrade before ingesting reports or alerts you do not control.
