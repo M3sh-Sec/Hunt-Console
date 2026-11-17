@@ -48,10 +48,13 @@ _MD5_RE = re.compile(r"\b[a-fA-F0-9]{32}\b")
 _SHA1_RE = re.compile(r"\b[a-fA-F0-9]{40}\b")
 _SHA256_RE = re.compile(r"\b[a-fA-F0-9]{64}\b")
 _CVE_RE = re.compile(r"\bCVE-\d{4}-\d{4,19}\b", re.IGNORECASE)
-_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
+# Bounded (RFC 5321: local part <= 64, domain <= 253): an unbounded local part is quadratic on "a.a.a.a...".
+_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9.\-]{1,253}\.[A-Za-z]{2,24}\b")
 _URL_RE = re.compile(r"\bhttps?://[^\s\"'<>\)\]]+", re.IGNORECASE)
+# The label repeat is bounded ({1,12}): an unbounded `(...\.)+` followed by a TLD is quadratic on
+# input such as "a.a.a.a..." (every start position walks the whole chain before failing).
 _DOMAIN_RE = re.compile(
-    r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+"
+    r"\b(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.){1,12}"
     r"(?:com|net|org|info|biz|io|co|ru|cn|top|xyz|club|online|site|link|icu|cc|tk|gq|ml|ga|cf)\b",
     re.IGNORECASE,
 )

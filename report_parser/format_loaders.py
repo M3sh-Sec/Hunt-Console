@@ -37,6 +37,8 @@ MAX_DOCUMENT_LEN = 50 * 1024 * 1024      # 50 MiB raw file
 MAX_ZIP_ENTRIES = 2000                    # zip-bomb guard for DOCX
 MAX_ZIP_UNCOMPRESSED_TOTAL = 200 * 1024 * 1024  # 200 MiB decompressed, total
 MAX_PDF_STREAM_DECOMPRESSED = 20 * 1024 * 1024  # 20 MiB per decompressed PDF stream
+MAX_PDF_TOTAL_DECOMPRESSED = 64 * 1024 * 1024   # 64 MiB decompressed across ALL streams of one PDF
+MAX_PDF_TOTAL_TEXT = 16 * 1024 * 1024           # 16 MiB of extracted text across all streams
 
 
 class ReportLoadError(Exception):
@@ -146,8 +148,39 @@ def load_text_from_docx(data: bytes) -> str:
 
 # ---------------------------------------------------------------- pdf ------
 
-_STREAM_RE = re.compile(rb"stream\r?\n(.*?)\r?\nendstream", re.DOTALL)
-_DICT_BEFORE_STREAM_RE = re.compile(rb"<<(.*?)>>\s*stream", re.DOTALL)
+
+
+def _iter_streams(data: bytes):
+    """
+    Yields (start_offset, raw_stream_bytes) for each `stream ... endstream` pair in ONE linear pass.
+    (The previous regex `stream\\r?\\n(.*?)\\r?\\nendstream` rescanned to the end of the file for every
+    `stream` that lacked an `endstream`: quadratic, 31 s for a 140 KB file.)
+    """
+    pos = 0
+    while True:
+        i = data.find(b"stream", pos)
+        if i < 0:
+            return
+        j = i + 6
+        if data.startswith(b"\r\n", j):
+            j += 2
+        elif data.startswith(b"\n", j):
+            j += 1
+        else:
+            pos = i + 6
+            continue
+        end = data.find(b"endstream", j)
+        if end < 0:
+            return
+        raw = data[j:end]
+        if raw.endswith(b"\r\n"):
+            raw = raw[:-2]
+        elif raw.endswith(b"\n"):
+            raw = raw[:-1]
+        yield i, raw
+        pos = end + 9
+
+
 _TJ_STRING_RE = re.compile(rb"\((?:[^()\\]|\\.)*\)\s*Tj")
 _TJ_ARRAY_RE = re.compile(rb"\[((?:[^\[\]\\]|\\.)*)\]\s*TJ")
 _PAREN_STRING_RE = re.compile(rb"\((?:[^()\\]|\\.)*\)")
@@ -184,29 +217,43 @@ def load_text_from_pdf(data: bytes) -> tuple[str, list[str]]:
 
     warnings: list[str] = []
     text_parts: list[str] = []
+    total_decompressed = 0
+    total_text = 0
 
-    for stream_match in _STREAM_RE.finditer(data):
-        raw_stream = stream_match.group(1)
-        preceding = data[max(0, stream_match.start() - 500):stream_match.start()]
-        dict_match = _DICT_BEFORE_STREAM_RE.search(preceding + b"stream")
-        obj_dict = dict_match.group(1) if dict_match else b""
+    for stream_start, raw_stream in _iter_streams(data):
+        preceding = data[max(0, stream_start - 500):stream_start]
+        # The object's dictionary is whatever sits between the previous `endobj` and this `stream`
+        # (up to 500 bytes). A regex over `<<(.*?)>>` here was quadratic on repeated `<<`.
+        obj_dict = preceding[preceding.rfind(b"endobj") + 6:] if b"endobj" in preceding else preceding
 
         content = raw_stream
         if b"/FlateDecode" in obj_dict:
             try:
                 d = zlib.decompressobj()
-                content = d.decompress(raw_stream, MAX_PDF_STREAM_DECOMPRESSED + 1)  # hard output cap
+                remaining = MAX_PDF_TOTAL_DECOMPRESSED - total_decompressed
+                if remaining <= 0:
+                    warnings.append("stopped reading streams: total decompressed size limit reached "
+                                    "(possible decompression bomb)")
+                    break
+                content = d.decompress(raw_stream, min(MAX_PDF_STREAM_DECOMPRESSED, remaining) + 1)  # hard output cap
             except zlib.error as exc:
                 warnings.append(f"skipped a FlateDecode stream that failed to decompress: {exc}")
                 continue
-            if len(content) > MAX_PDF_STREAM_DECOMPRESSED:
+            total_decompressed += len(content)
+            if len(content) > MAX_PDF_STREAM_DECOMPRESSED or total_decompressed > MAX_PDF_TOTAL_DECOMPRESSED:
                 warnings.append("skipped an oversized decompressed stream (possible decompression bomb)")
+                if total_decompressed > MAX_PDF_TOTAL_DECOMPRESSED:
+                    break
                 continue
         elif b"/Filter" in obj_dict:
             continue
 
         extracted = _extract_text_from_content_stream(content)
         if extracted:
+            total_text += len(extracted)
+            if total_text > MAX_PDF_TOTAL_TEXT:
+                warnings.append("stopped extracting: extracted text limit reached (possible decompression bomb)")
+                break
             text_parts.append(extracted)
 
     if not text_parts:

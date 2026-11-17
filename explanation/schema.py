@@ -10,10 +10,21 @@ accurate to what the query actually does.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 SCHEMA_VERSION = "1.0"
+
+
+def md_escape(text: str, *, limit: int = 2000) -> str:
+    """Neutralise untrusted text (report titles, alert names) before it is placed in the
+    Markdown hunt package: no HTML, no links/images, no headings or fences, bounded length."""
+    t = str(text)[:limit]
+    t = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    t = re.sub(r"([\\`*_\[\]#!|~])", r"\\\1", t)
+    t = re.sub(r"(?m)^(\s*)([-+=]|\d+\.)", r"\1\\\2", t)
+    return t.replace("\r", " ")
 
 
 @dataclass
@@ -64,7 +75,7 @@ class QueryExplanation:
 
     def to_markdown(self) -> str:
         lines = [f"### {self.platform} ({self.dialect}) — `{self.table_or_index}`", ""]
-        lines.append(f"**Summary:** {self.summary}")
+        lines.append(f"**Summary:** {md_escape(self.summary)}")
         lines.append("")
         lines.append(f"**Expected output:** {self.expected_output}")
         lines.append("")
@@ -89,6 +100,6 @@ class QueryExplanation:
         if self.caveats:
             lines.append("**Caveats:**")
             for c in self.caveats:
-                lines.append(f"- {c}")
+                lines.append(f"- {md_escape(c, limit=400)}")
             lines.append("")
         return "\n".join(lines)

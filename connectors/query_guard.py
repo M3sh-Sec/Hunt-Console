@@ -23,12 +23,72 @@ _KQL_FORBIDDEN_WORDS = {
     "range", "set", "declare", "restrict", "macro", "toscalar", "table", "external_table",
     "ingestion", "ingest", "plugin", "parse_json_external", "http_request", "http_request_post",
 }
-_KQL_STRING_RE = re.compile(r'@?"(?:[^"\\]|\\.)*"|@?\'(?:[^\'\\]|\\.)*\'')
-_KQL_COMMENT_RE = re.compile(r"//[^\n]*")
 _LQL_FORBIDDEN_WORDS = {
     "join", "selfjoin", "selfjoinfilter", "defineTable".lower(), "readfile", "createevents",
     "repo", "view", "writejson", "ingest", "lookup", "hash_index",
 }
+
+
+def _strip_literals(query: str, *, kql: bool) -> str:
+    """
+    Remove string literals and comments in ONE left-to-right pass, using the language's own
+    rules, so neither can hide or fake the other. (A regex that strips strings first and
+    comments second disagrees with the real parser: `@"\\"` is a complete KQL verbatim string,
+    and a quote inside a `//` comment does not open a string.)
+    KQL: `@"..."`/`@'...'` are verbatim (no backslash escapes; a doubled quote is a quote);
+    `"..."`/`'...'` take backslash escapes; `//` comments run to end of line.
+    Unterminated strings, KQL multi-line backtick/tilde strings and LogScale block comments are
+    refused (default deny: the generated queries never need them).
+    """
+    out: list[str] = []
+    i, n = 0, len(query)
+    while i < n:
+        c = query[i]
+        if c == "/" and query.startswith("//", i):
+            j = query.find("\n", i)
+            i = n if j < 0 else j
+            out.append(" ")
+            continue
+        if c == "/" and query.startswith("/*", i):
+            if kql:
+                out.append(c)
+                i += 1
+                continue
+            j = query.find("*/", i + 2)
+            if j < 0:
+                raise ConnectorQueryScopeError("unterminated comment")
+            i = j + 2
+            out.append(" ")
+            continue
+        if c in "`~" and kql:
+            raise ConnectorQueryScopeError("backtick/tilde string literals are not allowed")
+        verbatim = kql and c == "@" and i + 1 < n and query[i + 1] in "\"'"
+        if verbatim or c in "\"'":
+            q = query[i + 1] if verbatim else c
+            i += 2 if verbatim else 1
+            while True:
+                if i >= n:
+                    raise ConnectorQueryScopeError("unterminated string literal")
+                ch = query[i]
+                if verbatim:
+                    if ch == q:
+                        if i + 1 < n and query[i + 1] == q:
+                            i += 2
+                            continue
+                        i += 1
+                        break
+                elif ch == "\\":
+                    i += 2
+                    continue
+                elif ch == q:
+                    i += 1
+                    break
+                i += 1
+            out.append('""')
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 def validate_identifier(value: str, *, what: str = "identifier") -> str:
@@ -57,7 +117,7 @@ def enforce_kql_scope(query: str, allowed_tables: set[str]) -> None:
         raise ConnectorQueryScopeError("empty query")
     if len(query) > 20000:
         raise ConnectorQueryScopeError("query too long")
-    stripped = _KQL_COMMENT_RE.sub(" ", _KQL_STRING_RE.sub('""', query))
+    stripped = _strip_literals(query, kql=True)
     if ";" in stripped:
         raise ConnectorQueryScopeError("multiple statements are not allowed")
     body = stripped.strip()
@@ -81,7 +141,7 @@ def enforce_lql_scope(query: str) -> None:
     """LogScale queries: forbid cross-repo/view access and functions that read or join other data."""
     if not isinstance(query, str) or not query.strip() or len(query) > 20000:
         raise ConnectorQueryScopeError("empty or oversized query")
-    body = _KQL_STRING_RE.sub('""', query)
+    body = _strip_literals(query, kql=False)
     words = {w.lower() for w in re.findall(r"[A-Za-z_#][A-Za-z0-9_#]*", body)}
     bad = {w.lstrip("#") for w in words} & _LQL_FORBIDDEN_WORDS
     if bad:
