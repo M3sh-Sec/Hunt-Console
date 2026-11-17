@@ -1,7 +1,7 @@
 # Hunt Console MCP server - container image
 #
 # Build from the repository root:
-#   docker build -f mcp_server/Dockerfile -t huntconsole-mcp:1.2.0 .
+#   docker build -f mcp_server/Dockerfile -t huntconsole-mcp:1.2.1 .
 #
 # Run it from your MCP client with the hardened flags shown in
 # mcp_server/examples/claude_desktop_config.docker.json:
@@ -45,7 +45,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 USER 10001:10001
 
 LABEL org.opencontainers.image.title="huntconsole-mcp" \
-      org.opencontainers.image.version="1.2.0" \
+      org.opencontainers.image.version="1.2.1" \
       org.opencontainers.image.description="Hunt Console MCP server (stdio, read-only, offline)"
 
 # -E ignores PYTHON* environment variables, -s ignores the user site directory.

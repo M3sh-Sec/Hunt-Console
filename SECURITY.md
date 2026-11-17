@@ -1,5 +1,25 @@
 # Security notes - Hunt Console
 
+## 1.2.1 (2026-11-17): weekly review
+
+Scope: the whole 1.2.0 source tree. Each finding was reproduced with a script on the 1.2.0 code before it was fixed,
+and each regression test in `tests/test_security_regressions.py` was run on the 1.2.0 code and fails there.
+
+| ID | Severity | Where | Problem (reproduction on 1.2.0) | Fix |
+|----|----------|-------|------|-----|
+| VULN-09 | Medium | `connectors/query_guard.py` | The guard stripped strings with a regex before comments, which disagrees with the real KQL/LogScale lexer. `SigninLogs \| where U == @"\" \| union AuditLogs \| where C == "x"` and a quote inside a `//` comment both ACCEPTED, so `union` reached the API. (Only the guard was tested; no live tenant.) | One left-to-right tokenizer: verbatim `@"..."` strings (no backslash escapes), `//` comments, unterminated strings, KQL backtick/tilde strings and LogScale block comments handled or refused. |
+| VULN-10 | Medium | `report_parser/format_loaders.py` | Per-stream decompression cap only. 40 streams in a 1.1 MB PDF -> 118 s, 227 M characters, 517 MiB (linear; a 50 MiB PDF would run for hours). | 64 MiB total decompression budget and 16 MiB total extracted text per PDF. |
+| VULN-11 | Low | `explanation/schema.py` | Hunt package Markdown: `detection.name` (untrusted report/alert title) was placed raw in the explanation summary, and caveats raw too; HTML, links, images and headings survived (VULN-06 had only covered the top of the file). | `md_escape` (moved to `explanation/schema.py`, still importable from `cli`) applied to summary and caveats. |
+| VULN-12 | Medium | `report_parser/ioc_extraction.py` | `_DOMAIN_RE` and `_EMAIL_RE` quadratic on `a.a.a.a...`: 8 KB -> 2 s, 80 KB -> 7 s (email), extrapolated hours for the 5 MB cap. | Bounded repeats (`{1,12}` labels; local part <= 64, domain <= 253). 5 MB adversarial input now ~10 s. |
+| VULN-13 | Medium | `report_parser/format_loaders.py` | `stream\r?\n(.*?)\r?\nendstream` rescanned to end of file for every `stream` without `endstream`: 140 KB -> 31 s; also the `<<(.*?)>>` dictionary lookup (2.6 MB -> 7 s). | Linear `find()`-based scanner; dictionary taken from the text after the previous `endobj`. |
+
+Dependency and advisory research for this review is summarised in the review report in the project; no new advisory
+affecting `requests`, `msal` or the standard-library-only MCP server was confirmed. Not covered this week: `bandit` and
+`pip-audit` could not be installed (no package index reachable), no live-tenant test, the Windows installer was not run,
+and XML (DOCX) memory use for a 200 MiB `document.xml` was not measured.
+
+---
+
 ## 1.2.0 (2026-10-29): MCP server
 
 1.2.0 adds `huntconsole-mcp`. Its security design, and a line-by-line mapping to the MCP security

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.1 - 2026-11-17
+Security release (weekly review). See SECURITY.md, "1.2.1".
+- Fixed VULN-09: KQL/LogScale query guard could be bypassed with a verbatim string (`@"\"`) or a quote inside a `//` comment.
+- Fixed VULN-10: PDF loader had no total decompression/text budget across streams (1.1 MB file -> 118 s, 227 M characters).
+- Fixed VULN-11: untrusted report/alert titles reached the hunt package unescaped through the per-query explanation summary and caveats.
+- Fixed VULN-12: domain and e-mail IOC regexes were quadratic (ReDoS) on dotted input.
+- Fixed VULN-13: PDF stream scanning was quadratic on repeated `stream` keywords.
+- Added regression tests for each. No behaviour change for well-formed input.
+
 ## 1.2.0 - 2026-10-29
 - New: `huntconsole-mcp`, a local MCP server (stdio) exposing five read-only, offline tools:
   `hunt_from_indicators`, `hunt_from_report_text`, `hunt_cve_exposure`, `lookup_attack_technique`, and

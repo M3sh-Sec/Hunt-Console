@@ -96,16 +96,7 @@ def render_all(detection: IRDetection, targets: list[str]) -> dict[str, list[tup
 
 import re as _re
 
-
-def md_escape(text: str, *, limit: int = 2000) -> str:
-    """Neutralise untrusted text (report titles, alert names) before it is placed in the
-    Markdown hunt package: no HTML, no links/images, no headings or fences, bounded length."""
-    t = str(text)[:limit]
-    t = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    t = _re.sub(r"([\\`*_\[\]#!|~])", r"\\\1", t)
-    t = _re.sub(r"(?m)^(\s*)([-+=]|\d+\.)", r"\1\\\2", t)
-    return t.replace("\r", " ")
-
+from explanation.schema import md_escape  # noqa: E402,F401  (shared, also used by QueryExplanation.to_markdown)
 
 
 def write_outputs(

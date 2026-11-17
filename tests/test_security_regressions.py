@@ -144,6 +144,84 @@ def test_sandbox_returns_large_result():
     assert res.packets_processed == 20000
 
 
+# --- VULN-09 KQL/LQL guard: string and comment handling must follow the real lexer ---
+def test_kql_guard_verbatim_string_and_comment_bypass():
+    tables = {"SigninLogs"}
+    # `@"\\"` is a complete KQL verbatim string; the union after it is live code.
+    bypasses = [
+        'SigninLogs | where UserPrincipalName == @"\\" | union AuditLogs | where Category == "x"',
+        "SigninLogs | where A == 1 // \"\n| union AuditLogs\n| where B == \"x\"",
+        "SigninLogs | where A == 'x",            # unterminated string
+        "SigninLogs | where A == ```x```",       # multi-line string literal
+    ]
+    for q in bypasses:
+        assert _raises(lambda q=q: enforce_kql_scope(q, tables), ConnectorQueryScopeError), q
+    # legitimate shapes still pass
+    enforce_kql_scope('SigninLogs | where A == @"C:\\x" and B == "it\\"s" // note union', tables)
+
+
+def test_lql_guard_comment_quote_bypass():
+    q = '#type=x // "\n| join({#repo=other}, field=a)\n// "'
+    assert _raises(lambda: enforce_lql_scope(q), ConnectorQueryScopeError)
+
+
+# --- VULN-10 PDF: many small streams must not multiply the per-stream decompression cap ---
+def test_pdf_total_decompression_budget():
+    import report_parser.format_loaders as fl
+    old = getattr(fl, "MAX_PDF_TOTAL_DECOMPRESSED", None)
+    fl.MAX_PDF_TOTAL_DECOMPRESSED = 1024 * 1024        # shrink the budget so the test is fast
+    try:
+        payload = zlib.compress(b"(A) Tj\n" * (600 * 1024 // 7), 9)
+        pdf = b"%PDF-1.4\n" + b"".join(
+            b"1 0 obj\n<</Filter /FlateDecode>>\nstream\n" + payload + b"\nendstream\nendobj\n" for _ in range(20))
+        text, warnings = fl.load_text_from_pdf(pdf)
+    finally:
+        if old is not None:
+            fl.MAX_PDF_TOTAL_DECOMPRESSED = old
+    assert len(text) < 3 * 1024 * 1024, "decompression budget was not enforced across streams"
+    assert any("limit" in w or "bomb" in w for w in warnings)
+
+
+# --- VULN-11 Markdown injection through the per-query explanation (summary / caveats) ---
+def test_hunt_package_explanation_is_escaped(tmp_path=None):
+    import re
+    import tempfile
+    from pathlib import Path
+    import cli
+    evil = "R <img src=x onerror=alert(1)> [c](http://e.example/x) ![i](http://e.example/p.png)\n# Injected heading"
+    det = IRDetection(name=evil, description="d", conditions=IRConditionGroup(Logic.OR, [
+        IRCondition("process.cmdline", Operator.CONTAINS, "abc"),
+        IRCondition("host.name", Operator.EQUALS, "v")]))
+    out = Path(tempfile.mkdtemp(prefix="hc_md_"))
+    pkg = cli.write_outputs(det, cli.render_all(det, ["kql", "sigma"]), out).read_text()
+    prose = re.sub(r"```.*?```", "", pkg, flags=re.S)          # query text sits in code fences
+    assert "<img" not in prose and "<" not in prose.replace("&lt;", "")
+    assert not re.search(r"(?m)^#+ Injected", prose)
+    assert not re.search(r"(?<!\\)\]\(", prose) and not re.search(r"(?<!\\)!\[", prose)
+
+
+# --- VULN-12 IOC regexes were quadratic (ReDoS) on dotted input --------------------------
+def test_ioc_regexes_are_linear_on_dotted_input():
+    import time
+    from report_parser import ioc_extraction as ie
+    for text in ("a." * 12000, "a@" + "b." * 12000, "1." * 12000):
+        start = time.monotonic()
+        ie.extract_iocs(text)
+        assert time.monotonic() - start < 3, "IOC extraction is superlinear on dotted input"
+
+
+# --- VULN-13 PDF stream scanning was quadratic on repeated `stream` keywords --------------
+def test_pdf_stream_scan_is_linear():
+    import time
+    import report_parser.format_loaders as fl
+    start = time.monotonic()
+    fl.load_text_from_pdf(b"%PDF-1.4\n" + b"stream\n" * 20000)
+    assert time.monotonic() - start < 3, "PDF stream scan is superlinear"
+    # a normal stream is still found and decoded
+    pdf = b"%PDF-1.4\n1 0 obj\n<</Filter /FlateDecode>>\nstream\n" + zlib.compress(b"(hello) Tj") + b"\nendstream\nendobj\n"
+    assert "hello" in fl.load_text_from_pdf(pdf)[0]
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(list(globals().items())):
