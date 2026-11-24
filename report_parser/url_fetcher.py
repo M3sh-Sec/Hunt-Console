@@ -40,14 +40,30 @@ def _default_resolver(hostname: str) -> list[str]:
     return sorted({info[4][0] for info in infos})
 
 
+_EXTRA_BLOCKED_NETWORKS = (
+    ipaddress.ip_network("100.64.0.0/10"),   # carrier-grade NAT / shared address space (Tailscale, many VPNs)
+    ipaddress.ip_network("fec0::/10"),       # deprecated IPv6 site-local, still routed on some networks
+    ipaddress.ip_network("64:ff9b::/96"),    # NAT64: embeds an IPv4 address that may be internal
+    ipaddress.ip_network("64:ff9b:1::/48"),  # local-use NAT64
+)
+
+
 def _is_private_or_reserved(ip_str: str) -> bool:
     try:
         addr = ipaddress.ip_address(ip_str)
     except ValueError:
         return True  # unparseable — treat as unsafe rather than let it through
+    if isinstance(addr, ipaddress.IPv6Address):
+        # IPv4 embedded in IPv6 (mapped, 6to4): judge the IPv4 address it stands for.
+        for embedded in (addr.ipv4_mapped, addr.sixtofour):
+            if embedded is not None and _is_private_or_reserved(str(embedded)):
+                return True
+    if any(addr in net for net in _EXTRA_BLOCKED_NETWORKS if net.version == addr.version):
+        return True
     return (
         addr.is_private or addr.is_loopback or addr.is_link_local
         or addr.is_multicast or addr.is_reserved or addr.is_unspecified
+        or not addr.is_global
     )
 
 

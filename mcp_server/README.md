@@ -71,7 +71,7 @@ the repository should have that access.
 Build once from the repository root:
 
 ```bash
-docker build -f mcp_server/Dockerfile -t huntconsole-mcp:1.2.1 .
+docker build -f mcp_server/Dockerfile -t huntconsole-mcp:1.2.2 .
 ```
 
 Then use [examples/claude_desktop_config.docker.json](examples/claude_desktop_config.docker.json). It runs the

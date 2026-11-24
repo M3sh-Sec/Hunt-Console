@@ -1,5 +1,24 @@
 # Security notes - Hunt Console
 
+## 1.2.2 (2026-11-24): weekly review
+
+Scope: the 1.2.1 source tree, with extra attention to areas the 2026-11-17 review did not reach in depth: the PCAP decoder, `mcp_server/` (jobs, protocol, sandbox, paths, audit), the manual-input parsers, the KEV loader and the URL fetcher. Each finding was reproduced with a script on the 1.2.1 code before it was fixed, and each regression test in `tests/test_security_regressions.py` was run on the 1.2.1 code and fails there.
+
+| ID | Severity | Where | Problem (reproduction on 1.2.1) | Fix |
+|----|----------|-------|------|-----|
+| VULN-14 | Medium | `report_parser/ioc_extraction.py` | `_inside_url()` scanned every URL span for every domain match: quadratic. `"http://a.com " * n`: 104 KB -> 1.6 s, 52 KB -> 0.43 s (x4 per doubling); extrapolated about 150 s for the 1 M characters the MCP tool accepts (killed by the 60 s worker timeout) and hours for the CLI's 5 MB cap. | Binary search over the (ordered, non-overlapping) URL spans. |
+| VULN-15 | Medium | `manual_input/stix_parser.py` | `([A-Za-z0-9:\-\.'_]+)\s*=` retried at every offset of a long run without `=`: a 40 KB pattern took 11.4 s (20 KB 3.3 s), so a few MB of STIX would run for hours. CLI only (`manual --stix`); the MCP tools do not accept STIX. | Path length bounded to 64 and the match must start at the start of a run. |
+| VULN-16 | Medium | `report_parser/url_fetcher.py` | `_is_private_or_reserved()` did not block 100.64.0.0/10 (carrier-grade NAT; used by Tailscale and many VPNs), `fec0::/10` (IPv6 site-local), or NAT64 `64:ff9b::/96`. `is_safe_url("https://x.example.org/", resolver=lambda h: ["100.100.100.100"])` returned `(True, 'ok')`. An attacker-chosen hostname with an A record in that range reached internal hosts from the machine running `huntconsole report --url`. The CLI only; MCP does not fetch URLs. | Also require `is_global`, block those networks explicitly, and judge the IPv4 address embedded in IPv4-mapped and 6to4 IPv6 addresses. Re-checked at connect time as before. |
+| VULN-17 | Low | `manual_input/csv_parser.py`, `cve_hunt/kev.py` | A CSV field over 128 KiB raised `_csv.Error` (traceback); a KEV entry with a whitespace-only `vendorProject` raised `IndexError` in `build_ir_from_cves` (CLI traceback; generic "could not process the input" through MCP). Availability only. | CSV errors become `ManualInputParseError`; KEV strings are stripped. |
+
+Reviewed with no issue found: the PCAP decoder and pcap-to-IR path (DNS/SNI/Host values containing quotes, pipes or `//` came out sanitised in KQL, SPL and Sigma; 20,000 distinct names rendered in 0.03 s per backend), `mcp_server/` protocol framing, sandbox, path confinement, audit and rate limiter, the KQL/LogScale guard after last week's rewrite, GUI storage and sinks (no `innerHTML`, `eval`, or shared storage).
+
+Dependency and advisory research is in the review report in the project. Search-result listings only were read this week; no new advisory affecting `requests`, `msal`, or the standard-library-only MCP server was confirmed.
+
+Not covered: `bandit` and `pip-audit` could not be installed (no package index reachable), no live-tenant test, the Windows installer and Docker image were not run, memory use for a 200 MiB DOCX `document.xml` was not measured, and a slow-drip HTTPS response (one byte per timeout period) can still hold the CLI's URL fetch for longer than the per-read timeout (unconfirmed; no total deadline).
+
+---
+
 ## 1.2.1 (2026-11-17): weekly review
 
 Scope: the whole 1.2.0 source tree. Each finding was reproduced with a script on the 1.2.0 code before it was fixed,

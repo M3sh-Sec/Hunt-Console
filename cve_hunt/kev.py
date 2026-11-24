@@ -33,7 +33,7 @@ class KevEntry:
 
 
 def _clip(v, n: int = 300) -> str:
-    return str(v or "")[:n]
+    return str(v or "").strip()[:n]
 
 
 def parse_cve_ids(items: Iterable[str]) -> list[str]:

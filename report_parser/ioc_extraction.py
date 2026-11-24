@@ -17,6 +17,7 @@ just written safely) shouldn't cause it to be missed.
 
 from __future__ import annotations
 
+import bisect
 import re
 from dataclasses import dataclass
 
@@ -96,10 +97,14 @@ def extract_iocs(raw_text: str) -> list[ExtractedIOC]:
                 ExtractedIOC(kind, m.group(0).lower(), _snippet(text, m.start(), m.end()), confidence=0.9)
             )
 
+    # finditer() yields non-overlapping spans in order, so a binary search finds the only span that can contain
+    # `pos`. (`any(...)` over every span was quadratic: 104 KB of "http://a.com " took 1.6 s, 5 MB hours.)
     url_spans = [(m.start(), m.end()) for m in _URL_RE.finditer(text)]
+    url_starts = [s for s, _ in url_spans]
 
     def _inside_url(pos: int) -> bool:
-        return any(s <= pos < e for s, e in url_spans)
+        i = bisect.bisect_right(url_starts, pos) - 1
+        return i >= 0 and pos < url_spans[i][1]
 
     for m in _DOMAIN_RE.finditer(text):
         if _inside_url(m.start()):
