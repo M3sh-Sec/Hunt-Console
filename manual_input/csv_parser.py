@@ -41,6 +41,14 @@ def parse_csv(text: str) -> tuple[list[ManualIndicator], list[str]]:
     indicators: list[ManualIndicator] = []
     warnings: list[str] = []
 
+    try:
+        _read_rows(reader, header_map, indicators, warnings)
+    except csv.Error as exc:
+        raise ManualInputParseError(f"CSV could not be read: {exc}") from None
+    return indicators, warnings
+
+
+def _read_rows(reader, header_map, indicators, warnings) -> None:
     for line_num, row in enumerate(reader, start=2):  # header is line 1
         if len(indicators) >= MAX_INDICATORS_PER_BATCH:
             warnings.append(f"stopped at {MAX_INDICATORS_PER_BATCH} indicators (batch size cap reached)")
@@ -63,5 +71,3 @@ def parse_csv(text: str) -> tuple[list[ManualIndicator], list[str]]:
             notes=(raw_notes.strip() if raw_notes else None),
             source_line=line_num,
         ))
-
-    return indicators, warnings

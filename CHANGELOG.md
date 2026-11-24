@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.2 - 2026-11-24
+Security release (weekly review). See SECURITY.md, "1.2.2".
+- Fixed VULN-14: IOC extraction checked "is this domain inside a URL" against every URL (quadratic; 104 KB of URLs took 1.6 s, 5 MB hours).
+- Fixed VULN-15: the STIX pattern comparison regex was quadratic on long runs of path characters (40 KB -> 11 s).
+- Fixed VULN-16: the report-URL fetcher's address filter allowed carrier-grade-NAT / shared space (100.64.0.0/10, e.g. Tailscale), IPv6 site-local and NAT64 addresses.
+- Fixed VULN-17 (Low): an oversized CSV field and a blank KEV vendor/product raised unhandled exceptions (CLI traceback).
+- Added regression tests for each. No behaviour change for well-formed input.
+
 ## 1.2.1 - 2026-11-17
 Security release (weekly review). See SECURITY.md, "1.2.1".
 - Fixed VULN-09: KQL/LogScale query guard could be bypassed with a verbatim string (`@"\"`) or a quote inside a `//` comment.

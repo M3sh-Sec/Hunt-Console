@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "huntconsole"
-version = "1.2.1"
+version = "1.2.2"
 description = "Threat-intel-to-hunting-query pipeline: PCAP/report/manual IOC and TTP ingestion, producing validated KQL, SPL, and Sigma detection queries."
 readme = "README.md"
 requires-python = ">=3.10"

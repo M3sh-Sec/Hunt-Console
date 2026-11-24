@@ -222,6 +222,72 @@ def test_pdf_stream_scan_is_linear():
     assert "hello" in fl.load_text_from_pdf(pdf)[0]
 
 
+# --- VULN-14 IOC extraction: URL-containment check was quadratic ---------------------------
+def test_ioc_extraction_many_urls_is_linear():
+    import time
+    import report_parser.ioc_extraction as ie
+    text = "http://a.com " * 16000      # old code: ~6.5 s, grows with the square of the input
+    start = time.monotonic()
+    found = ie.extract_iocs(text)
+    assert time.monotonic() - start < 2, "URL-containment check is superlinear"
+    assert sum(1 for i in found if i.ioc_type == "url") == 16000
+    # a domain outside a URL is still found, one inside a URL is still skipped
+    kinds = [(i.ioc_type, i.value) for i in ie.extract_iocs("see http://in.example.com/x and out.example.org end")]
+    assert ("domain", "out.example.org") in kinds and ("domain", "in.example.com") not in kinds
+
+
+# --- VULN-15 STIX comparison regex was quadratic ---------------------------------------------
+def test_stix_comparison_regex_is_linear():
+    import json
+    import time
+    from manual_input.stix_parser import parse_stix_bundle
+    bundle = json.dumps({"type": "bundle", "objects": [
+        {"type": "indicator", "id": "indicator--1", "pattern": "a" * 40000}]})
+    start = time.monotonic()
+    parse_stix_bundle(bundle)          # old code: ~11 s
+    assert time.monotonic() - start < 3, "STIX pattern parsing is superlinear"
+    ok = json.dumps({"type": "bundle", "objects": [
+        {"type": "indicator", "id": "indicator--2", "pattern": "[ipv4-addr:value = '203.0.113.9']"}]})
+    inds, _ = parse_stix_bundle(ok)
+    assert [(i.indicator_type, i.value) for i in inds] == [("ip", "203.0.113.9")]
+
+
+# --- VULN-16 SSRF filter missed shared address space (100.64/10), site-local and NAT64 -----
+def test_url_fetcher_blocks_cgnat_sitelocal_nat64():
+    from report_parser.url_fetcher import _is_private_or_reserved, is_safe_url
+    for addr in ("100.64.0.1", "100.100.100.100", "100.127.255.254", "fec0::1", "64:ff9b::808:808",
+                 "::ffff:10.0.0.1", "2002:a00:1::", "127.0.0.1", "169.254.169.254", "10.1.2.3"):
+        assert _is_private_or_reserved(addr), addr
+    for addr in ("8.8.8.8", "93.184.216.34", "2606:4700:4700::1111"):
+        assert not _is_private_or_reserved(addr), addr
+    ok, _ = is_safe_url("https://x.example.org/r.pdf", resolver=lambda h: ["100.100.100.100"])
+    assert not ok
+    ok, _ = is_safe_url("https://x.example.org/r.pdf", resolver=lambda h: ["93.184.216.34"])
+    assert ok
+
+
+# --- VULN-17 unhandled exceptions from untrusted CSV / KEV content -------------------------
+def test_csv_oversized_field_is_a_parse_error():
+    from manual_input.schema import ManualInputParseError
+    from manual_input.csv_parser import parse_csv
+    try:
+        parse_csv("type,value\nip," + "1" * 200000 + "\n")
+    except ManualInputParseError:
+        pass
+    else:
+        raise AssertionError("expected ManualInputParseError")
+
+
+def test_kev_blank_vendor_does_not_crash():
+    import json
+    from cve_hunt.builder import build_ir_from_cves
+    from cve_hunt.kev import parse_kev_json_text
+    kev = parse_kev_json_text(json.dumps({"vulnerabilities": [
+        {"cveID": "CVE-2026-1111", "vendorProject": "  ", "product": "Widget"}]}))
+    det = build_ir_from_cves(["CVE-2026-1111"], kev)      # old code: IndexError
+    assert det.conditions.items
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(list(globals().items())):

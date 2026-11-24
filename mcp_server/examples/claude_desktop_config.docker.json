@@ -14,7 +14,7 @@
         "--cpus=1",
         "--user", "10001:10001",
         "--mount", "type=bind,source=/Users/YOU/ThreatIntel/inbox,target=/data,readonly",
-        "huntconsole-mcp:1.2.1",
+        "huntconsole-mcp:1.2.2",
         "--allow-dir", "/data"
       ]
     }

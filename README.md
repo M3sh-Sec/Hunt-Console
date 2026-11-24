@@ -314,7 +314,7 @@ Each run produces, in your `--out` folder:
   connector code and required permissions in `connectors/registry.yaml`
   before pointing it at production credentials.
 
-## Security (version 1.2.1)
+## Security (version 1.2.2)
 
 Version 1.2.0 adds the MCP server. It is stdio-only, read-only, offline,
 has no third-party dependencies, reads files only from folders you allow, and

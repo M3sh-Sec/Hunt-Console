@@ -19,4 +19,4 @@ Security posture (details in mcp_server/SECURITY.md):
 
 SERVER_NAME = "huntconsole"
 SERVER_TITLE = "Hunt Console"
-SERVER_VERSION = "1.2.1"
+SERVER_VERSION = "1.2.2"

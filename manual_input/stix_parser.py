@@ -43,7 +43,9 @@ _STIX_PATH_TO_TYPE = {
     "mutex:name": "mutex",
 }
 
-_COMPARISON_RE = re.compile(r"([A-Za-z0-9:\-\.'_]+)\s*=\s*'([^']*)'")
+# The path is bounded and must start at the beginning of a run of path characters: an unbounded `[...]+` retried at
+# every offset of a long run without "=" is quadratic (40 KB pattern -> 11 s, 1 MB -> hours).
+_COMPARISON_RE = re.compile(r"(?<![A-Za-z0-9:\-\.'_])([A-Za-z0-9:\-\.'_]{1,64})\s*=\s*'([^']*)'")
 
 
 def _map_stix_path(path: str):
